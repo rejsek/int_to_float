@@ -3,15 +3,64 @@
 .stack  1024
 ExitProcess proto,dwExitCode:dword
 
+STD_INPUT_HANDLE  EQU -10
+STD_OUTPUT_HANDLE EQU -11
+STD_ERROR_HANDLE  EQU -12
+
+GetStdHandle PROTO, nStdHandle: DWORD
+WriteConsoleA PROTO, handle: DWORD, lpBuffer:PTR BYTE, nNumberOfBytesToWrite:DWORD, lpNumberOfBytesWritten:PTR DWORD, lpReserved:DWORD
+ReadConsoleA PROTO,  handle: DWORD, lpBuffer:PTR BYTE, nNumberOfBytesToRead:DWORD, lpNumberOfCharsRead:PTR DWORD, pInputControl:DWORD
+ExitProcess PROTO, dwExitCode: DWORD
 
 .data
-    input           dd  -1256000     ; Inicializace celeho cisla pro prevod
+    input           dd  ?       ; Inicializace celeho cisla pro prevod
     msb_pos         dd  0       ; Inicializace pomocne promenne pro ulozeni hlavniho bitu
-    result          dd  0       ; Inicializace promenne, do ktere se ulozi vysledny prevod
-    sign            dd  0
+    sign            dd  0       ; Inicializace promenne, ktera uchovava informaci o znamenku
+
+    consoleOutHandler dd ?
+    consoleInHandler  dd ?
+    result_digits     db 10 DUP(?)
+
+    buffer          db	128 DUP(?)
+    bytes	        dd  ?
 
 .code
 main proc c
+
+      INVOKE GetStdHandle, STD_INPUT_HANDLE             ; Vezmi input handler
+      mov consoleInHandler, eax
+  
+      ; Nacteni cisla z konzole
+      INVOKE ReadConsoleA, consoleInHandler, offset buffer, lengthof buffer, offset bytes, 0
+
+      mov eax, 0
+      mov esi, offset buffer
+
+      movzx edx, byte ptr [esi]
+      cmp edx, 2Dh              ; Jestli je to "-"
+      jne convert_loop          ; Pokud neni vstup zaporny, pokracuj standartnim cyklem
+
+      inc esi                   ; Preskoc prvni znak
+      mov [sign], 1
+
+      ; Pretypovani na HEX cislo
+      convert_loop:
+	    movzx edx, byte ptr [esi]   ; Načíst ASCII znak do EDX
+
+	    cmp edx, 0DH
+	    je done
+
+	    ; Provést konverzi na číslici a aktualizovat registru EAX
+        sub dl, '0'                ; Konverze ASCII na numerickou hodnotu
+        imul eax, eax, 10          ; Násobení aktuálního výsledku deseti
+        add eax, edx               ; Přidání aktuální číslice k výsledku
+	
+	    inc esi                    ; Posunout ukazatel na další znak v řetězci
+	    jmp convert_loop           ; Opakovat cyklus pro další znak
+
+      done:
+      mov [input], eax
+
       ; Inicializace
       xor eax, eax ; eax - vynulování registru
       xor ebx, ebx ; ebx - vynulování registru
@@ -25,20 +74,10 @@ main proc c
       mov ebx, input
       shr ebx, 31
 
-      cmp ebx, 1        ; zjisti, zda je na ebx 1
-      jne continue
-      not eax
-      add eax, 1
-      mov ebx, 1
-      shl ebx, 31
-      mov[sign], ebx
+      xor ebx, ebx      ; Vynulovani registru ebx
 
-      continue:
-
-      xor ebx, ebx
-
-      ; Hledani pozice nejvyznamnejsiho bity (MSB)
-       mov ecx, 31           ; Inicializace čítače
+      ; Hledani pozice nejvyznamnejsiho bitu (MSB)
+      mov ecx, 31           ; Inicializace čítače
       mov edx, 80000000h    ; inicializave porovnavaci hodnoty
 
       search_msb:
@@ -71,13 +110,36 @@ main proc c
       shl esi, 23       ; Posun exponentu do spravne pozice
 
       ; Kombinace exponentu a mantisy
-      xor ebx, ebx
-      mov ebx, [sign]
-      or eax, ebx
-      or eax, esi       ; Kombinace s ER4 (exponentem)
+      xor ebx, ebx      ; Vynulovani registru ebx
+      mov ebx, [sign]   ; Nacteni hodnoty v promenne sign
+      shl ebx, 31
+      or eax, ebx       ; Kombinace se znaminkem
+      or eax, esi       ; Kombinace s exponentem
 
-      ; Ulozeni vysledky do pameti
-      mov [result], eax     ; Ulozeni vysledku do promenne result
+      ; Převod výsledku na hexadecimální řetězec
+      lea edi, result_digits + 8
+      mov ecx, 8
+      mov ebx, 16
+
+      convert_to_hex_loop:
+          mov edx, 0
+          div ebx
+          add dl, '0'           ; Pro zjisteni ASCII reprezentace cisla
+          cmp dl, '9'           ; Porovnani, jestli je hodnota '9' - pokud je vetsi, zvoli se pismeno
+          jbe not_letter
+          add dl, 7
+
+      not_letter:
+          mov [edi], dl
+          dec edi
+          loop convert_to_hex_loop
+
+      mov byte ptr [edi], 0     ; Ukonceni retezce
+
+      INVOKE GetStdHandle, STD_OUTPUT_HANDLE
+      mov consoleOutHandler, eax
+
+      INVOKE WriteConsoleA, consoleOutHandler, offset result_digits, 9, offset bytes, 0
 
     invoke  ExitProcess,0
 main endp
