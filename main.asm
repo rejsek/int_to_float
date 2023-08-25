@@ -13,28 +13,30 @@ ReadConsoleA PROTO,  handle: DWORD, lpBuffer:PTR BYTE, nNumberOfBytesToRead:DWOR
 ExitProcess PROTO, dwExitCode: DWORD
 
 .data
-    input           dd  ?       ; Inicializace celeho cisla pro prevod
-    msb_pos         dd  0       ; Inicializace pomocne promenne pro ulozeni hlavniho bitu
-    sign            dd  0       ; Inicializace promenne, ktera uchovava informaci o znamenku
+    input               dd  ?       ; Inicializace celeho cisla pro prevod
+    msb_pos             dd  0       ; Inicializace pomocne promenne pro ulozeni hlavniho bitu
+    sign                dd  0       ; Inicializace promenne, ktera uchovava informaci o znamenku
 
-    consoleOutHandler dd ?
-    consoleInHandler  dd ?
-    result_digits     db 10 DUP(?)
+    consoleOutHandler   dd  ?
+    consoleInHandler    dd  ?
+    result_digits       db  10 DUP(?)
     
-    new_line          db " ", 10, 0
-    msg               db "Vysledek prevodu je: ", 13, 10, 0
+    new_line            db  " ", 10, 0
+    msg                 db  "Vysledek prevodu je: ", 13, 10, 0
 
-    buffer          db	128 DUP(?)
-    bytes	        dd  ?
+    buffer              db	 128 DUP(?)
+    bytes	            dd   ?
 
 .code
-main proc c
+
+; Podprogram pro zjisteni vstupu od uzivatele
+ReadInput proc
     INVOKE GetStdHandle, STD_INPUT_HANDLE             ; Vezmi input handler
     mov consoleInHandler, eax
   
     ; Nacteni cisla z konzole
     INVOKE ReadConsoleA, consoleInHandler, offset buffer, lengthof buffer, offset bytes, 0
-
+    
     mov eax, 0
     mov esi, offset buffer
 
@@ -62,7 +64,50 @@ main proc c
 
     done:
         mov [input], eax
+    ret
 
+ReadInput endp
+
+; Podprogram pro vypsani vysledku a zpravy do konzole
+ShowOutput proc
+    ; Převod výsledku na řetězec
+    lea edi, result_digits + 8
+    mov ecx, 8
+    mov ebx, 16
+
+    convert_to_hex_loop:
+        mov edx, 0
+        div ebx
+        add dl, '0'           ; Pro zjisteni ASCII reprezentace cisla
+        cmp dl, '9'           ; Porovnani, jestli je hodnota '9' - pokud je vetsi, zvoli se pismeno
+        jbe not_letter
+        add dl, 7
+
+    not_letter:
+        mov [edi], dl
+        dec edi
+        loop convert_to_hex_loop
+
+    mov byte ptr [edi], 0     ; Ukonceni retezce
+
+    INVOKE GetStdHandle, STD_OUTPUT_HANDLE
+    mov consoleOutHandler, eax
+
+    INVOKE WriteConsoleA, consoleOutHandler, offset new_line, lengthof new_line, offset bytes, 0
+    INVOKE WriteConsoleA, consoleOutHandler, offset msg, lengthof msg, offset bytes, 0
+    INVOKE WriteConsoleA, consoleOutHandler, offset result_digits, 9, offset bytes, 0
+
+    ret
+
+ShowOutput endp
+
+; Hlavni bod programu
+main proc
+    call ReadInput
+
+    cmp eax, 0
+    je done         ;pokud je vstup 0
+    
     ; Inicializace
     xor eax, eax ; eax - vynulování registru
     xor ebx, ebx ; ebx - vynulování registru
@@ -118,32 +163,8 @@ main proc c
     or eax, ebx       ; Kombinace se znaminkem
     or eax, esi       ; Kombinace s exponentem
 
-    ; Převod výsledku na hexadecimální řetězec
-    lea edi, result_digits + 8
-    mov ecx, 8
-    mov ebx, 16
-
-    convert_to_hex_loop:
-        mov edx, 0
-        div ebx
-        add dl, '0'           ; Pro zjisteni ASCII reprezentace cisla
-        cmp dl, '9'           ; Porovnani, jestli je hodnota '9' - pokud je vetsi, zvoli se pismeno
-        jbe not_letter
-        add dl, 7
-
-    not_letter:
-        mov [edi], dl
-        dec edi
-        loop convert_to_hex_loop
-
-    mov byte ptr [edi], 0     ; Ukonceni retezce
-
-    INVOKE GetStdHandle, STD_OUTPUT_HANDLE
-    mov consoleOutHandler, eax
-
-    INVOKE WriteConsoleA, consoleOutHandler, offset new_line, lengthof new_line, offset bytes, 0
-    INVOKE WriteConsoleA, consoleOutHandler, offset msg, lengthof msg, offset bytes, 0
-    INVOKE WriteConsoleA, consoleOutHandler, offset result_digits, 9, offset bytes, 0
+    done:
+        call ShowOutput
 
     invoke  ExitProcess,0
 main endp
